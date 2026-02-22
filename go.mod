@@ -35,3 +35,10 @@ require (
 	golang.org/x/time v0.10.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace (
+	github.com/pion/dtls/v3 => ../dtls
+	github.com/pion/ice/v4 => ../ice
+	github.com/pion/sctp => ../sctp
+	github.com/pion/srtp/v3 => ../srtp
+)

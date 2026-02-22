@@ -181,6 +181,82 @@ func (t *ICETransport) Start(gatherer *ICEGatherer, params ICEParameters, role *
 	return nil
 }
 
+// Resume incoming connectivity checks based on its configured role without blocking.
+func (t *ICETransport) Resume(gatherer *ICEGatherer, params ICEParameters, role *ICERole) error { //nolint:cyclop
+	t.lock.Lock()
+	defer t.lock.Unlock()
+
+	if t.State() != ICETransportStateNew {
+		return errICETransportNotInNew
+	}
+
+	if gatherer != nil {
+		t.gatherer = gatherer
+	}
+
+	if err := t.ensureGatherer(); err != nil {
+		return err
+	}
+
+	agent := t.gatherer.getAgent()
+	if agent == nil {
+		return fmt.Errorf("%w: unable to resume ICETransport", errICEAgentNotExist)
+	}
+
+	if err := agent.OnConnectionStateChange(func(iceState ice.ConnectionState) {
+		state := newICETransportStateFromICE(iceState)
+
+		t.setState(state)
+		t.onConnectionStateChange(state)
+	}); err != nil {
+		return err
+	}
+	if err := agent.OnSelectedCandidatePairChange(func(local, remote ice.Candidate) {
+		candidates, err := newICECandidatesFromICE([]ice.Candidate{local, remote}, "", 0)
+		if err != nil {
+			t.log.Warnf("%w: %s", errICECandiatesCoversionFailed, err)
+
+			return
+		}
+		t.onSelectedCandidatePairChange(NewICECandidatePair(&candidates[0], &candidates[1]))
+	}); err != nil {
+		return err
+	}
+
+	if role == nil {
+		controlled := ICERoleControlled
+		role = &controlled
+	}
+	t.role = *role
+
+	_, ctxCancel := context.WithCancel(context.Background())
+	t.ctxCancel = ctxCancel
+
+	// Use Resume instead of Dial/Accept to avoid blocking
+	iceConn, err := agent.Resume(*role == ICERoleControlling,
+		params.UsernameFragment,
+		params.Password)
+
+	if err != nil {
+		return err
+	}
+
+	if t.State() == ICETransportStateClosed {
+		return errICETransportClosed
+	}
+
+	t.conn = iceConn
+
+	config := mux.Config{
+		Conn:          t.conn,
+		BufferSize:    int(t.gatherer.api.settingEngine.getReceiveMTU()), //nolint:gosec // G115
+		LoggerFactory: t.loggerFactory,
+	}
+	t.mux = mux.NewMux(config)
+
+	return nil
+}
+
 // restart is not exposed currently because ORTC has users create a whole new ICETransport
 // so for now lets keep it private so we don't cause ORTC users to depend on non-standard APIs.
 func (t *ICETransport) restart() error {
@@ -337,6 +413,25 @@ func (t *ICETransport) AddRemoteCandidate(remoteCandidate *ICECandidate) error {
 	}
 
 	return agent.AddRemoteCandidate(candidate)
+}
+
+// InvalidateSelectedPair clears the currently selected candidate pair and
+// forces the ICE agent back to Checking state so it can discover new paths
+// after a server migration.
+func (t *ICETransport) InvalidateSelectedPair() error {
+	t.lock.RLock()
+	defer t.lock.RUnlock()
+
+	if err := t.ensureGatherer(); err != nil {
+		return err
+	}
+
+	agent := t.gatherer.getAgent()
+	if agent == nil {
+		return fmt.Errorf("%w: unable to invalidate selected pair", errICEAgentNotExist)
+	}
+
+	return agent.InvalidateSelectedPair()
 }
 
 // State returns the current ice transport state.

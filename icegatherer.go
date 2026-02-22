@@ -48,6 +48,15 @@ type ICEGatherer struct {
 	// Used for ICE candidate pooling
 	candidatePool        []ice.Candidate
 	iceCandidatePoolSize uint8
+
+	injectedLocalParams *ICEParameters
+}
+
+// InjectLocalParameters sets the local ICE parameters to use when creating the Agent.
+func (g *ICEGatherer) InjectLocalParameters(params ICEParameters) {
+	g.lock.Lock()
+	defer g.lock.Unlock()
+	g.injectedLocalParams = &params
 }
 
 // ICEAddressRewriteMode controls whether a rule replaces or appends candidates.
@@ -261,14 +270,21 @@ func (g *ICEGatherer) baseAgentOptions(mDNSMode ice.MulticastDNSMode) []ice.Agen
 }
 
 func (g *ICEGatherer) credentialOptions() []ice.AgentOption {
-	ufrag := g.api.settingEngine.candidates.UsernameFragment
-	pass := g.api.settingEngine.candidates.Password
+	var ufrag, pass string
+	if g.injectedLocalParams != nil {
+		ufrag = g.injectedLocalParams.UsernameFragment
+		pass = g.injectedLocalParams.Password
+	} else {
+		ufrag = g.api.settingEngine.candidates.UsernameFragment
+		pass = g.api.settingEngine.candidates.Password
+	}
+
 	if ufrag == "" && pass == "" {
 		return nil
 	}
 
 	return []ice.AgentOption{
-		ice.WithLocalCredentials(g.api.settingEngine.candidates.UsernameFragment, g.api.settingEngine.candidates.Password),
+		ice.WithLocalCredentials(ufrag, pass),
 	}
 }
 

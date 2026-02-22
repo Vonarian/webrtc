@@ -337,6 +337,36 @@ func (t *DTLSTransport) Start(remoteParameters DTLSParameters) error {
 	return nil
 }
 
+// Resume DTLS transport using an already established DTLS state.
+func (t *DTLSTransport) Resume(dtlsState *dtls.State, remoteParameters DTLSParameters) error {
+	_, certificate, err := t.prepareStart(remoteParameters)
+	if err != nil {
+		return err
+	}
+
+	dtlsEndpoint := t.iceTransport.newEndpoint(mux.MatchDTLS)
+	dtlsEndpoint.SetOnClose(t.internalOnCloseHandler)
+
+	sharedOpts := t.dtlsSharedOptions(certificate)
+
+	dtlsConn, err := dtls.ResumeWithOptions(dtlsState, dtlsEndpoint, dtlsEndpoint.RemoteAddr(), sharedOpts...)
+	if err != nil {
+		dtlsEndpoint.SetOnClose(nil)
+		_ = dtlsEndpoint.Close()
+
+		return t.failStart(err)
+	}
+
+	if err = t.completeStart(dtlsConn); err != nil {
+		dtlsEndpoint.SetOnClose(nil)
+		_ = dtlsConn.Close()
+
+		return err
+	}
+
+	return nil
+}
+
 func (t *DTLSTransport) prepareStart(remoteParameters DTLSParameters) (DTLSRole, tls.Certificate, error) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
