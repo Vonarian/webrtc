@@ -46,6 +46,7 @@ type ICEGatherer struct {
 	sdpMLineIndex atomic.Uint32 // uint16
 
 	// Used for ICE candidate pooling
+	candidatePoolLock    sync.Mutex
 	candidatePool        []ice.Candidate
 	iceCandidatePoolSize uint8
 
@@ -453,14 +454,14 @@ func (g *ICEGatherer) Gather() error { //nolint:cyclop
 		sdpMLineIndex := uint16(g.sdpMLineIndex.Load()) //nolint:gosec // G115
 
 		if candidate != nil {
-			g.lock.Lock()
+			g.candidatePoolLock.Lock()
 			if g.iceCandidatePoolSize > 0 && g.candidatePool != nil {
 				g.candidatePool = append(g.candidatePool, candidate)
-				g.lock.Unlock()
+				g.candidatePoolLock.Unlock()
 
 				return
 			}
-			g.lock.Unlock()
+			g.candidatePoolLock.Unlock()
 
 			c, err := newICECandidateFromICE(candidate, sdpMid, sdpMLineIndex)
 			if err != nil {
@@ -475,13 +476,13 @@ func (g *ICEGatherer) Gather() error { //nolint:cyclop
 
 			// If gathering completes before flushing (i.e., before SetLocalDescription), avoid triggering nil.
 			// Users expect valid candidates to be emitted before the nil completion signal.
-			g.lock.Lock()
+			g.candidatePoolLock.Lock()
 			if g.iceCandidatePoolSize > 0 && g.candidatePool != nil {
-				g.lock.Unlock()
+				g.candidatePoolLock.Unlock()
 
 				return
 			}
-			g.lock.Unlock()
+			g.candidatePoolLock.Unlock()
 
 			onLocalCandidateHandler(nil)
 		}
@@ -499,11 +500,13 @@ func (g *ICEGatherer) setMediaStreamIdentification(mid string, mLineIndex uint16
 }
 
 func (g *ICEGatherer) flushCandidates() {
-	g.lock.Lock()
+	g.candidatePoolLock.Lock()
 
 	candidates := g.candidatePool
 	g.candidatePool = nil
 	g.iceCandidatePoolSize = 0
+
+	g.candidatePoolLock.Unlock()
 
 	onLocalCandidateHandler := func(*ICECandidate) {}
 	if handler, ok := g.onLocalCandidateHandler.Load().(func(candidate *ICECandidate)); ok && handler != nil {
@@ -514,8 +517,6 @@ func (g *ICEGatherer) flushCandidates() {
 	if mid, ok := g.sdpMid.Load().(string); ok {
 		sdpMid = mid
 	}
-
-	g.lock.Unlock()
 
 	sdpMLineIndex := uint16(g.sdpMLineIndex.Load()) //nolint:gosec // G115
 
