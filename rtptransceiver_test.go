@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 //go:build !js
-// +build !js
 
 package webrtc
 
@@ -273,4 +272,36 @@ func Test_RTPTransceiver_UnattachedRTX(t *testing.T) {
 	assert.Equal(t, -1, strings.Index(answer.SDP, "rtx"))
 
 	closePairNow(t, offerPC, answerPC)
+}
+
+func Test_ParseExtensionFromPaddingOnlyPacket(t *testing.T) {
+	buf := []byte{
+		176, 114, 15, 39, 0, 0, 0, 0, 209, 108, 221, 2, 190,
+		222, 0, 2, 64, 49, 176, 102, 49, 0, 1, 0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255,
+	}
+	mid, rid, rsid, paddingOnly, err := handleUnknownRTPPacket(
+		buf, uint8(4),
+		uint8(10),
+		uint8(11),
+	)
+	assert.NoError(t, err)
+
+	assert.Equal(t, mid, "1")
+	assert.Equal(t, rid, "")
+	assert.Equal(t, rsid, "f")
+	assert.Equal(t, paddingOnly, true)
 }
